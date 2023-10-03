@@ -1,0 +1,26 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: EventListener
+metadata:
+  name: deploy-petstore-event-listener
+  namespace: petstore
+spec:
+  namespaceSelector: {}
+  resources: {}
+  serviceAccountName: pipeline
+  triggers:
+    - bindings:
+        - kind: TriggerBinding
+          ref: deploy-petstore-trigger-binding
+      template:
+        ref: deploy-petstore-trigger-template
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: deploy-petstore-event-listener-route
+  namespace: petstore
+spec:
+  host: 
+  to:
+    kind: Service
+    name: el-deploy-petstore-event-listener

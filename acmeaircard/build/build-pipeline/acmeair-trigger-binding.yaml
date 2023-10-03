@@ -1,0 +1,13 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerBinding
+metadata:
+  name: acmeaircard-build-trigger-binding
+  namespace: acmeaircard
+spec:
+  params:
+    - name: pusherName
+      value: $(body.pusherName)
+    - name: storageClass
+      value: $(body.storageClass)
+    - name: imageLocation
+      value: $(body.imageLocation)

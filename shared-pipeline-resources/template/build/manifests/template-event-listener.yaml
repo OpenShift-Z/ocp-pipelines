@@ -1,0 +1,26 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: EventListener
+metadata:
+  name: <project-name>-build-event-listener
+  namespace: <project-name>
+spec:
+  namespaceSelector: {}
+  resources: {}
+  serviceAccountName: pipeline
+  triggers:
+    - bindings:
+        - kind: TriggerBinding
+          ref: <project-name>-build-trigger-binding
+      template:
+        ref: <project-name>-build-trigger-template
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: <project-name>-build-event-listener-route
+  namespace: <project-name>
+spec:
+  host: build-event-listener-route-<project-name>.apps.build0.fpet.pokprv.stglabs.ibm.com
+  to:
+    kind: Service
+    name: el-<project-name>-build-event-listener

@@ -1,0 +1,33 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerTemplate
+metadata:
+  name: acmeaircard-deploy-trigger-template
+  namespace: acmeaircard
+spec:
+  params:
+    - name: imageLocation
+    - name: storageClass
+    - name: pusherName
+    - name: applicationHost
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        annotations:
+          pipeline.openshift.io/started-by: $(tt.params.pusherName)
+        generateName: deploy-acmeaircard-
+        labels:
+          tekton.dev/pipeline: deploy-acmeaircard
+        namespace: acmeaircard
+      spec:
+        params:
+          - name: imageLocation
+            value: $(tt.params.imageLocation)
+          - name: storageClass
+            value: $(tt.params.storageClass)
+          - name: applicationHost
+            value: $(tt.params.applicationHost)
+        pipelineRef:
+          name: deploy-acmeaircard
+        resources: []
+        status: null

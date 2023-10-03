@@ -1,0 +1,164 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: manager-pipeline
+  namespace: manager-pipeline
+spec:
+  tasks:
+    - name: sign-into-xocp1
+      params:
+        - name: clusterURL
+          value: xocp1.fpet.pokprv.stglabs.ibm.com
+      taskRef:
+        kind: ClusterTask
+        name: sign-into-cluster
+      workspaces:
+        - name: creds
+          workspace: funkid-creds-secret
+        - name: kubeconfig
+          workspace: xocp1-kubeconfig-pvc
+    - name: sign-into-build0
+      params:
+        - name: clusterURL
+          value: build0.fpet.pokprv.stglabs.ibm.com
+      taskRef:
+        kind: ClusterTask
+        name: sign-into-cluster
+      workspaces:
+        - name: creds
+          workspace: funkid-creds-secret
+        - name: kubeconfig
+          workspace: build0-kubeconfig-pvc
+    - name: sign-into-test0
+      params:
+        - name: clusterURL
+          value: test0.fpet.pokprv.stglabs.ibm.com
+      taskRef:
+        kind: ClusterTask
+        name: sign-into-cluster
+      workspaces:
+        - name: creds
+          workspace: funkid-creds-secret
+        - name: kubeconfig
+          workspace: test0-kubeconfig-pvc
+    - name: clone-ocp-pipelines
+      params:
+        - name: url
+          value: 'https://github.ibm.com/LinuxCoC/ocp-pipelines.git'
+        - name: revision
+          value: multiple-clusters
+        - name: submodules
+          value: 'true'
+        - name: depth
+          value: '1'
+        - name: sslVerify
+          value: 'true'
+        - name: crtFileName
+          value: ca-bundle.crt
+        - name: deleteExisting
+          value: 'true'
+        - name: verbose
+          value: 'true'
+        - name: gitInitImage
+          value: >-
+            registry.redhat.io/openshift-pipelines/pipelines-git-init-rhel8@sha256:a538c423e7a11aae6ae582a411fdb090936458075f99af4ce5add038bb6983e8
+        - name: userHome
+          value: /tekton/home
+      taskRef:
+        kind: ClusterTask
+        name: git-clone-1-8-0
+      workspaces:
+        - name: output
+          workspace: git-repo
+    - name: add-sa-creds
+      runAfter:
+        - clone-ocp-pipelines
+      taskRef:
+        kind: Task
+        name: add-creds
+      workspaces:
+        - name: source
+          workspace: git-repo
+        - name: gh-secret
+          workspace: git-secret
+    - name: update-s390x-build-resources
+      params:
+        - name: SCRIPT
+          value: >
+            cd /workspace/manifest-dir && ./create-build-pipelines.sh build0
+            test0
+        - name: VERSION
+          value: latest
+      runAfter:
+        - add-sa-creds
+        - sign-into-build0
+      taskRef:
+        kind: Task
+        name: ocp-client
+      workspaces:
+        - name: manifest-dir
+          workspace: git-repo
+        - name: kubeconfig-dir
+          workspace: build0-kubeconfig-pvc
+    - name: update-x86-build-resources
+      params:
+        - name: SCRIPT
+          value: >
+            cd /workspace/manifest-dir && ./create-build-pipelines.sh xocp1
+            xocp1
+        - name: VERSION
+          value: latest
+      runAfter:
+        - update-s390x-build-resources
+        - sign-into-xocp1
+      taskRef:
+        kind: Task
+        name: ocp-client
+      workspaces:
+        - name: manifest-dir
+          workspace: git-repo
+        - name: kubeconfig-dir
+          workspace: xocp1-kubeconfig-pvc
+    - name: update-s390x-deploy-resources
+      params:
+        - name: SCRIPT
+          value: |
+            cd /workspace/manifest-dir && ./create-deploy-pipelines.sh test0
+        - name: VERSION
+          value: latest
+      runAfter:
+        - add-sa-creds
+        - sign-into-test0
+      taskRef:
+        kind: Task
+        name: ocp-client
+      workspaces:
+        - name: manifest-dir
+          workspace: git-repo
+        - name: kubeconfig-dir
+          workspace: test0-kubeconfig-pvc
+    - name: update-x86-deploy-resources
+      params:
+        - name: SCRIPT
+          value: |
+            cd /workspace/manifest-dir && ./create-deploy-pipelines.sh xocp1
+        - name: VERSION
+          value: latest
+      runAfter:
+        - update-s390x-deploy-resources
+        - sign-into-xocp1
+      taskRef:
+        kind: Task
+        name: ocp-client
+      workspaces:
+        - name: manifest-dir
+          workspace: git-repo
+        - name: kubeconfig-dir
+          workspace: xocp1-kubeconfig-pvc
+  workspaces:
+    - name: build0-kubeconfig-pvc
+    - name: test0-kubeconfig-pvc
+    - name: xocp1-kubeconfig-pvc
+    - name: funkid-creds-secret
+    - name: git-repo
+    - name: git-secret

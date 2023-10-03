@@ -1,0 +1,302 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: acmeaircard-build-prime
+  namespace: acmeaircard
+spec:
+  params:
+    - name: pusherName
+      type: string
+  tasks:
+    - name: sign-into-xocp1
+      params:
+        - name: clusterURL
+          value: xocp1.fpet.pokprv.stglabs.ibm.com
+      taskRef:
+        kind: ClusterTask
+        name: sign-into-cluster
+      workspaces:
+        - name: creds
+          workspace: funkid-creds-secret
+        - name: kubeconfig
+          workspace: xocp1-kubeconfig-pvc
+    - name: sign-into-build0
+      params:
+        - name: clusterURL
+          value: build0.fpet.pokprv.stglabs.ibm.com
+      taskRef:
+        kind: ClusterTask
+        name: sign-into-cluster
+      workspaces:
+        - name: creds
+          workspace: funkid-creds-secret
+        - name: kubeconfig
+          workspace: build0-kubeconfig-pvc
+    - name: start-s390x-build
+      retries: 5
+      params:
+        - name: SCRIPT
+          value: >
+            #!/bin/bash
+
+            curl --header "Content-Type: application/json" \\n  --request POST --fail
+            \\n  --data '{"pusherName": "$(params.pusherName)", "storageClass": "nfs-client", "imageLocation": "intreg0.fpet.pokprv.stglabs.ibm.com:5000"}' \\n 
+            http://build-event-listener-route-acmeaircard-s390x.apps.build0.fpet.pokprv.stglabs.ibm.com
+      taskRef:
+        kind: ClusterTask
+        name: ocp-client
+      runAfter:
+        - sign-into-build0
+    - name: start-x86-build
+      retries: 5
+      params:
+        - name: SCRIPT
+          value: >
+            #!/bin/bash
+
+            curl --header "Content-Type: application/json" \\n  --request POST --fail
+            \\n  --data '{"pusherName": "$(params.pusherName)", "storageClass": "gpfsces-nfs-storage", "imageLocation": "intreg0.fpet.pokprv.stglabs.ibm.com:5000"}' \\n 
+            http://build-event-listener-route-acmeaircard-x86.apps.xocp1.fpet.pokprv.stglabs.ibm.com
+      taskRef:
+        kind: ClusterTask
+        name: ocp-client
+      runAfter:
+        - sign-into-xocp1
+    - name: wait-for-s390x-build
+      params:
+        - name: SCRIPT
+          value: >
+            #!/bin/bash 
+            
+            set -ex
+
+            sleep 60
+
+            while tkn pipelinerun describe --last -n $(context.pipelineRun.namespace) -o
+            jsonpath='{.status.conditions}' | grep -iw Running ; do
+              
+              tkn pipelinerun describe --last -n $(context.pipelineRun.namespace) -o jsonpath='{.status.conditions}'
+
+              sleep 30
+
+            done
+
+            echo -e "\n\nPipelinerun finished, checking result"
+
+            tkn pipelinerun describe --last -n $(context.pipelineRun.namespace) -o
+            jsonpath='{.status.conditions}'
+
+            if tkn pipelinerun describe --last -n $(context.pipelineRun.namespace) -o
+            jsonpath='{.status.conditions}' | grep -iE "false" ; then
+              echo "last run failed"
+              exit 1
+            else
+              echo "last run succeeded"
+              exit 0
+            fi  
+      runAfter:
+        - start-s390x-build
+      taskRef:
+        kind: ClusterTask
+        name: tkn-1-8-0
+      workspaces:
+        - name: kubeconfig
+          workspace: build0-kubeconfig-pvc
+    - name: wait-for-x86-build
+      params:
+        - name: SCRIPT
+          value: >
+            #!/bin/bash 
+            
+            set -ex
+
+            sleep 60
+
+            while tkn pipelinerun describe --last -n $(context.pipelineRun.namespace) -o
+            jsonpath='{.status.conditions}' | grep -iw Running ; do
+              
+              tkn pipelinerun describe --last -n $(context.pipelineRun.namespace) -o jsonpath='{.status.conditions}'
+
+              sleep 30
+
+            done
+
+            echo -e "\n\nPipelinerun finished, checking result"
+
+            tkn pipelinerun describe --last -n $(context.pipelineRun.namespace) -o
+            jsonpath='{.status.conditions}'
+
+            if tkn pipelinerun describe --last -n $(context.pipelineRun.namespace) -o
+            jsonpath='{.status.conditions}' | grep -iE "false" ; then
+              echo "last run failed"
+              exit 1
+            else
+              echo "last run succeeded"
+              exit 0
+            fi  
+      runAfter:
+        - start-x86-build
+      taskRef:
+        kind: ClusterTask
+        name: tkn-1-8-0
+      workspaces:
+        - name: kubeconfig
+          workspace: xocp1-kubeconfig-pvc
+    - name: assemble-auth-manifest
+      params:
+        - name: manifest-name
+          value: "intreg0.fpet.pokprv.stglabs.ibm.com:5000/acmeaircard/acmeair-authservice-java:latest"
+        - name: image-name
+          value: "intreg0.fpet.pokprv.stglabs.ibm.com:5000/acmeaircard/acmeair-authservice-java"
+        - name: tags
+          value: "x86,s390x"
+      runAfter:
+        - wait-for-s390x-build
+        - wait-for-x86-build
+      taskRef:
+        kind: ClusterTask
+        name: assemble-manifest
+      workspaces:
+        - name: src-pull-secret
+          workspace: src-pull-secret
+        - name: dest-pull-secret
+          workspace: dest-pull-secret
+    - name: assemble-booking-manifest
+      params:
+        - name: manifest-name
+          value: "intreg0.fpet.pokprv.stglabs.ibm.com:5000/acmeaircard/acmeair-bookingservice-java:latest"
+        - name: image-name
+          value: "intreg0.fpet.pokprv.stglabs.ibm.com:5000/acmeaircard/acmeair-bookingservice-java"
+        - name: tags
+          value: "x86,s390x"
+      runAfter:
+        - wait-for-s390x-build
+        - wait-for-x86-build
+      taskRef:
+        kind: ClusterTask
+        name: assemble-manifest
+      workspaces:
+        - name: src-pull-secret
+          workspace: src-pull-secret
+        - name: dest-pull-secret
+          workspace: dest-pull-secret
+    - name: assemble-card-manifest
+      params:
+        - name: manifest-name
+          value: "intreg0.fpet.pokprv.stglabs.ibm.com:5000/acmeaircard/acmeair-cardservice-java:latest"
+        - name: image-name
+          value: "intreg0.fpet.pokprv.stglabs.ibm.com:5000/acmeaircard/acmeair-cardservice-java"
+        - name: tags
+          value: "x86,s390x"
+      runAfter:
+        - wait-for-s390x-build
+        - wait-for-x86-build
+      taskRef:
+        kind: ClusterTask
+        name: assemble-manifest
+      workspaces:
+        - name: src-pull-secret
+          workspace: src-pull-secret
+        - name: dest-pull-secret
+          workspace: dest-pull-secret
+    - name: assemble-customer-manifest
+      params:
+        - name: manifest-name
+          value: "intreg0.fpet.pokprv.stglabs.ibm.com:5000/acmeaircard/acmeair-customerservice-java:latest"
+        - name: image-name
+          value: "intreg0.fpet.pokprv.stglabs.ibm.com:5000/acmeaircard/acmeair-customerservice-java"
+        - name: tags
+          value: "x86,s390x"
+      runAfter:
+        - wait-for-s390x-build
+        - wait-for-x86-build
+      taskRef:
+        kind: ClusterTask
+        name: assemble-manifest
+      workspaces:
+        - name: src-pull-secret
+          workspace: src-pull-secret
+        - name: dest-pull-secret
+          workspace: dest-pull-secret
+    - name: assemble-flight-manifest
+      params:
+        - name: manifest-name
+          value: "intreg0.fpet.pokprv.stglabs.ibm.com:5000/acmeaircard/acmeair-flightservice-java:latest"
+        - name: image-name
+          value: "intreg0.fpet.pokprv.stglabs.ibm.com:5000/acmeaircard/acmeair-flightservice-java"
+        - name: tags
+          value: "x86,s390x"
+      runAfter:
+        - wait-for-s390x-build
+        - wait-for-x86-build
+      taskRef:
+        kind: ClusterTask
+        name: assemble-manifest
+      workspaces:
+        - name: src-pull-secret
+          workspace: src-pull-secret
+        - name: dest-pull-secret
+          workspace: dest-pull-secret
+    - name: assemble-main-manifest
+      params:
+        - name: manifest-name
+          value: "intreg0.fpet.pokprv.stglabs.ibm.com:5000/acmeaircard/acmeair-mainservice-java:latest"
+        - name: image-name
+          value: "intreg0.fpet.pokprv.stglabs.ibm.com:5000/acmeaircard/acmeair-mainservice-java"
+        - name: tags
+          value: "x86,s390x"
+      runAfter:
+        - wait-for-s390x-build
+        - wait-for-x86-build
+      taskRef:
+        kind: ClusterTask
+        name: assemble-manifest
+      workspaces:
+        - name: src-pull-secret
+          workspace: src-pull-secret
+        - name: dest-pull-secret
+          workspace: dest-pull-secret
+    - name: start-s390x-deploy-pipeline
+      retries: 5
+      params:
+        - name: SCRIPT
+          value: >
+            #!/bin/bash
+            set -ex
+
+            curl --header "Content-Type: application/json" --fail --request POST --data '{"pusherName": "$(params.pusherName)", "imageLocation": "intreg0.fpet.pokprv.stglabs.ibm.com:5000", "storageClass": "ocs-storagecluster-cephfs", "applicationHost": "acmeair-acmeaircard.apps.test0.fpet.pokprv.stglabs.ibm.com"}' deploy-$(context.pipelineRun.namespace)-event-listener-route-$(context.pipelineRun.namespace).apps.test0.fpet.pokprv.stglabs.ibm.com
+      runAfter:
+        - assemble-auth-manifest
+        - assemble-booking-manifest
+        - assemble-card-manifest
+        - assemble-customer-manifest
+        - assemble-flight-manifest
+        - assemble-main-manifest
+      taskRef:
+        kind: ClusterTask
+        name: ocp-client
+    - name: start-x86-deploy-pipeline
+      retries: 5
+      params:
+        - name: SCRIPT
+          value: >
+            #!/bin/bash
+            set -ex
+
+            curl --header "Content-Type: application/json" --fail --request POST --data '{"pusherName": "$(params.pusherName)", "imageLocation": "intreg0.fpet.pokprv.stglabs.ibm.com:5000", "storageClass": "gpfsces-nfs-storage", "applicationHost": "acmeair-acmeaircard.apps.xocp1.fpet.pokprv.stglabs.ibm.com"}' deploy-$(context.pipelineRun.namespace)-event-listener-route-$(context.pipelineRun.namespace).apps.xocp1.fpet.pokprv.stglabs.ibm.com
+      runAfter:
+        - assemble-auth-manifest
+        - assemble-booking-manifest
+        - assemble-card-manifest
+        - assemble-customer-manifest
+        - assemble-flight-manifest
+        - assemble-main-manifest
+      taskRef:
+        kind: ClusterTask
+        name: ocp-client
+  workspaces:
+    - name: build0-kubeconfig-pvc
+    - name: xocp1-kubeconfig-pvc
+    - name: funkid-creds-secret
+    - name: dest-pull-secret
+    - name: src-pull-secret

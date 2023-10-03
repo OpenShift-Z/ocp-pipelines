@@ -1,0 +1,21 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: deploy-image
+  namespace: <project-name>
+spec:
+  params:
+    - name: imageLocation
+      type: string
+  steps:
+    - image: >-
+        intreg0.fpet.pokprv.stglabs.ibm.com:5000/test0/ocp4-openshift4-operators-openshift4-ose-cli:c8cfefd
+      name: create-deployment
+      resources: {}
+      script: |
+        #!/bin/bash
+
+        cat <<EOF | oc apply -f -
+          <deployment-yaml>
+          <one-yaml-per-task>
+        EOF

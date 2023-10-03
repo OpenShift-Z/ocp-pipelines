@@ -1,0 +1,9 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerBinding
+metadata:
+  name: petstore-build-prime-trigger-binding
+  namespace: petstore
+spec:
+  params:
+    - name: pusher-name
+      value: $(body.pusher.name)

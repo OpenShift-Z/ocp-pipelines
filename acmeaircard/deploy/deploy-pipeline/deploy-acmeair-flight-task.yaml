@@ -1,0 +1,195 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: deploy-acmeair-flight
+  namespace: acmeaircard
+spec:
+  params:
+    - name: imageLocation
+      type: string
+    - name: storageClass
+      type: string
+    - name: applicationHost
+      type: string
+  steps:
+    - image: >-
+        intreg0.fpet.pokprv.stglabs.ibm.com:5000/openshift/cli:latest
+      name: create-flight-deployment
+      resources: {}
+      script: |
+        #!/bin/bash
+
+        cat <<EOF | oc apply -f -
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: acmeair-flightservice
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                name: acmeair-flight-deployment
+            template:
+              metadata:
+                labels:
+                  name: acmeair-flight-deployment
+                  app: acmeair-3
+                annotations:
+                  prometheus.io/scrape: "true"
+                  prometheus.io/port: "9080"
+              spec:
+                containers:
+                - name: acmeair-flightservice-java
+                  image: $(params.imageLocation)/$(context.taskRun.namespace)/acmeair-flightservice-java:latest
+                  ports:
+                    - containerPort: 9080
+                    - containerPort: 9443
+                  imagePullPolicy: Always
+                  env:
+                  - name: USERNAME
+                    value: admin
+                  - name: PASSWORD
+                    value: password
+                  - name: MONGO_HOST
+                    value: acmeair-flight-db
+                  - name: SECURE_SERVICE_CALLS
+                    value: 'true'
+                  readinessProbe:
+                    httpGet:
+                      path: /health
+                      port: 9080
+                    initialDelaySeconds: 10
+                    periodSeconds: 5
+                  livenessProbe:
+                    httpGet:
+                      path: /health
+                      port: 9080
+                    initialDelaySeconds: 120
+                    periodSeconds: 15
+        EOF
+    - image: 'intreg0.fpet.pokprv.stglabs.ibm.com:5000/openshift/cli:latest'
+      name: create-flight-service
+      resources: {}
+      script: |
+        #!/bin/bash
+
+        cat <<EOF | oc apply -f -
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: acmeair-flight-service
+          spec:
+            ports:
+              - port: 9080
+            selector:
+              name: acmeair-flight-deployment
+        EOF
+    - image: 'intreg0.fpet.pokprv.stglabs.ibm.com:5000/openshift/cli:latest'
+      name: create-flight-db-service
+      resources: {}
+      script: |
+        #!/bin/bash
+
+        cat <<EOF | oc apply -f -
+          ##### Flight Database #####
+          apiVersion: v1
+          kind: Service
+          metadata:
+            creationTimestamp: null
+            labels:
+              service: acmeair-flight-db
+            name: acmeair-flight-db
+          spec:
+            ports:
+            - name: "27017"
+              port: 27017
+              protocol: TCP
+              targetPort: 27017
+            selector:
+              name: acmeair-flight-db
+          status:
+            loadBalancer: {}
+        EOF
+    - image: 'intreg0.fpet.pokprv.stglabs.ibm.com:5000/openshift/cli:latest'
+      name: create-flight-db
+      resources: {}
+      script: |
+        #!/bin/bash
+
+        cat <<EOF | oc apply -f -
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            creationTimestamp: null
+            name: acmeair-flight-db
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                name: acmeair-flight-db
+            strategy: {}
+            template:
+              metadata:
+                creationTimestamp: null
+                labels:
+                  name: acmeair-flight-db
+              spec:
+                volumes:
+                  - name: acmeair-flight-db-2
+                    persistentVolumeClaim:
+                      claimName: flightpvc
+                containers:
+                - image: $(params.imageLocation)/$(context.taskRun.namespace)/mongo:latest
+                  name: acmeair-flight-db
+                  ports:
+                  - containerPort: 27017
+                    protocol: TCP
+                  resources: {}
+                  volumeMounts:
+                    - name: acmeair-flight-db-2
+                      mountPath: /data/db
+                restartPolicy: Always
+          status: {}
+        EOF
+    - image: 'intreg0.fpet.pokprv.stglabs.ibm.com:5000/openshift/cli:latest'
+      name: create-pvc
+      resources: {}
+      script: |
+        #!/bin/bash
+
+        cat <<EOF | oc apply -f -
+          ### Create Persistent Volume Claim ###
+          kind: PersistentVolumeClaim
+          apiVersion: v1
+          metadata:
+            name: flightpvc 
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 5Gi
+            storageClassName: $(params.storageClass)
+            volumeMode: Filesystem
+
+        EOF
+        sleep 120
+    - image: >-
+        intreg0.fpet.pokprv.stglabs.ibm.com:5000/openshift/cli:latest
+      name: create-routes
+      resources: {}
+      script: |
+        #!/bin/bash
+        cat <<EOF | oc apply -f -
+          apiVersion: route.openshift.io/v1
+          kind: Route
+          metadata:
+            name: acmeair-flight-route
+          spec:
+            path: /flight
+            host: $(params.applicationHost)
+            to:
+              kind: Service
+              name: acmeair-flight-service
+        EOF
+        sleep 30

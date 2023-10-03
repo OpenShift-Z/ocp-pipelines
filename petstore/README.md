@@ -1,0 +1,4 @@
+- FEP DB config files
+- FEP subscription
+- FEP cluster creation
+- Deployment pipeline

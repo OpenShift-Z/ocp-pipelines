@@ -1,0 +1,57 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerTemplate
+metadata:
+  name: petstore-build-trigger-template
+  namespace: petstore
+spec:
+  params:
+    - name: pusher-name
+    - name: storageClass
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        annotations:
+          pipeline.openshift.io/started-by: $(tt.params.pusher-name)
+        generateName: petstore-build-
+        labels:
+          tekton.dev/pipeline: petstore-build
+        namespace: petstore
+      spec:
+        params:
+          - name: deployment-name
+            value: petstore
+          - name: git-url
+            value: 'https://github.ibm.com/LinuxCoC/petstore.git'
+          - name: git-revision
+            value: main
+          - name: buildah-context
+            value: jpetstore/
+          - name: dockerfile-path
+            value: ./Dockerfile
+          - name: image-tag
+            value: 'intreg0.fpet.pokprv.stglabs.ibm.com:5000/petstore/petstore:<arch>'
+        pipelineRef:
+          name: petstore-build
+        resources: []
+        status: null
+        workspaces:
+          - name: shared-ws
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 1Gi
+                storageClassName: $(tt.params.storageClass)
+                volumeMode: Filesystem
+          - name: deploy-kubeconfig
+            secret:
+              secretName: test0-kubeconf 
+          - name: push-secret
+            secret:
+              secretName: intreg0
+          - name: petstore-secret
+            secret:
+              secretName: petstoredb-creds

@@ -1,0 +1,148 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: petstore-build
+  namespace: petstore
+spec:
+  params:
+    - default: 'https://github.ibm.com/LinuxCoC/petstore.git'
+      description: url of the git repo for petstore deployment
+      name: git-url
+      type: string
+    - default: main
+      description: revision of the git repo to be deployed
+      name: git-revision
+      type: string
+    - default: jpetstore/
+      description: Context directory for buildah to use (appended to /workspace/source/)
+      name: buildah-context
+      type: string
+    - default: ./Dockerfile
+      description: path to dockerfile for buildah to use relative to the context directory
+      name: dockerfile-path
+      type: string
+    - default: 'intreg0.fpet.pokprv.stglabs.ibm.com:5000/petstore/petstore:<arch>'
+      description: tag for the built image
+      name: image-tag
+      type: string
+  tasks:
+    - name: fetch-repository
+      params:
+        - name: url
+          value: $(params.git-url)
+        - name: revision
+          value: $(params.git-revision)
+        - name: deleteExisting
+          value: 'true'
+      taskRef:
+        kind: ClusterTask
+        name: git-clone
+      workspaces:
+        - name: output
+          workspace: shared-ws
+    - name: add-in-db-user
+      runAfter:
+        - fetch-repository
+      params:
+        - name: secretKey
+          value: pguser
+        - name: fileName
+          value: manifests/create-fepcluster.yaml,jpetstore/war/WEB-INF/jdbc.properties,jpetstore/db/postgres/configure_db.sh
+        - name: oldText
+          value: <db-user-name>
+      taskRef:
+        kind: ClusterTask
+        name: make-sub-from-secret
+      workspaces:
+        - name: files
+          workspace: shared-ws
+        - name: secretData
+          workspace: petstore-secret
+    - name: add-in-db-password
+      runAfter:
+        - add-in-db-user
+      taskRef:
+        kind: ClusterTask
+        name: make-sub-from-secret
+      params:
+        - name: secretKey
+          value: pgpassword
+        - name: fileName
+          value: manifests/create-fepcluster.yaml,jpetstore/war/WEB-INF/jdbc.properties,jpetstore/db/postgres/configure_db.sh
+        - name: oldText
+          value: <db-password>
+      workspaces:
+        - name: files
+          workspace: shared-ws
+        - name: secretData
+          workspace: petstore-secret
+    - name: build-image
+      params:
+        - name: IMAGE
+          value: $(params.image-tag)
+        - name: CONTEXT
+          value: /workspace/source/$(params.buildah-context)
+        - name: DOCKERFILE
+          value: $(params.dockerfile-path)
+        - name: FORMAT
+          value: docker
+        - name: SKIP_PUSH
+          value: 'false'
+      runAfter:
+        - add-in-db-password
+      taskRef:
+        kind: ClusterTask
+        name: buildah-1-8-0
+      workspaces:
+        - name: source
+          workspace: shared-ws
+    - name: create-db-files-cm
+      params:
+        - name: SCRIPT
+          value: >
+            #!/bin/bash
+
+            context="/workspace/manifest-dir/jpetstore/db/postgres"
+
+            oc create cm petstore-db-files -n $(context.pipelineRun.namespace)
+            --from-file="$context" || oc set data cm petstore-db-files -n
+            $(context.pipelineRun.namespace) --from-file="$context"
+      runAfter:
+        - build-image
+      taskRef:
+        kind: ClusterTask
+        name: ocp-client
+      workspaces:
+        - name: manifest-dir
+          workspace: shared-ws
+        - name: kubeconfig-dir
+          workspace: deploy-kubeconfig
+    - name: create-operator-group
+      params:
+        - name: SCRIPT
+          value: >
+            #!/bin/bash
+
+            cat <<EOF | oc apply -f -
+              apiVersion: operators.coreos.com/v1
+              kind: OperatorGroup
+              metadata:
+                name: petstore-operatorgroup
+                namespace: petstore
+              spec:
+                targetNamespaces:
+                - petstore
+      runAfter:
+        - build-image
+      taskRef:
+        kind: ClusterTask
+        name: ocp-client
+      workspaces:
+        - name: manifest-dir
+          workspace: shared-ws
+        - name: kubeconfig-dir
+          workspace: deploy-kubeconfig
+  workspaces:
+    - name: shared-ws
+    - name: deploy-kubeconfig
+    - name: petstore-secret

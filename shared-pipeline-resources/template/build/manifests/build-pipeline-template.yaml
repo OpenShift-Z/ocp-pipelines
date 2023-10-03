@@ -1,0 +1,71 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: <project-name>-build
+  namespace: <project-name>
+spec:
+  params:
+    - default: '<github-link>'
+      description: url of the git repo for <project-name> deployment
+      name: git-url
+      type: string
+    - default: main
+      description: revision of the git repo to be deployed
+      name: git-revision
+      type: string
+    - default: 'intreg0.fpet.pokprv.stglabs.ibm.com:5000/test0'
+      name: image-location
+      description: where should the resulting images be placed?
+      type: string
+  tasks:
+    - name: fetch-repository
+      params:
+        - name: url
+          value: $(params.git-url)
+        - name: revision
+          value: $(params.git-revision)
+        - name: deleteExisting
+          value: 'true'
+      taskRef:
+        kind: ClusterTask
+        name: git-clone
+      workspaces:
+        - name: output
+          workspace: shared-ws
+    - name: build-image
+      params:
+        - name: IMAGE
+          value: >-
+            $(params.image-location)/$(context.pipelineRun.namespace)/<image-name>:latest
+        - name: CONTEXT
+          value: /workspace/source/<build-directory>
+        - name: DOCKERFILE
+          value: Dockerfile
+        - name: FORMAT
+          value: docker
+        - name: SKIP_PUSH
+          value: 'true'
+      runAfter:
+        - fetch-repository
+      taskRef:
+        kind: ClusterTask
+        name: buildah
+      workspaces:
+        - name: source
+          workspace: shared-ws
+    - name: start-deploy-pipeline
+      params:
+        - name: SCRIPT
+          value: >
+            #!/bin/bash
+
+            curl --header "Content-Type: application/json"  --request POST \
+            --data '{"pusher": {"name": "build0"},"image": {"location": "intreg0.fpet.pokprv.stglabs.ibm.com:5000/test0"}}' \
+            http://$(context.pipelineRun.namespace)-deploy-event-listener-route-$(context.pipelineRun.namespace).apps.test0.fpet.pokprv.stglabs.ibm.com
+      runAfter:
+        - build-image
+      taskRef:
+        kind: ClusterTask
+        name: openshift-client
+  workspaces:
+    - name: shared-ws

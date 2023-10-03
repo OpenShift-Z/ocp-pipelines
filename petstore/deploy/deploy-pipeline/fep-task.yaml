@@ -1,0 +1,347 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: create-fep-for-petstore
+  namespace: petstore
+spec:
+  params:
+    - name: storageclass
+      type: string
+    - name: fepcluster-name
+      type: string
+  steps:
+    - image: >-
+        intreg0.fpet.pokprv.stglabs.ibm.com:5000/openshift/cli:latest
+      name: create-operator-subscription
+      resources: {}
+      script: |
+        #!/bin/bash
+
+        cat <<EOF | oc apply -f -
+          apiVersion: v1
+          items:
+          - apiVersion: operators.coreos.com/v1alpha1
+            kind: Subscription
+            metadata:
+              name: fujitsu-enterprise-postgres-operator
+              namespace: $(context.taskRun.namespace)
+            spec:
+              channel: stable
+              installPlanApproval: Automatic
+              name: fujitsu-enterprise-postgres-operator
+              source: certified-operator-index
+              sourceNamespace: openshift-marketplace
+          kind: List
+          metadata:
+            resourceVersion: ""
+            selfLink: ""
+        EOF
+        sleep 120
+
+    - image: >-
+        intreg0.fpet.pokprv.stglabs.ibm.com:5000/openshift/cli:latest
+      name: wait-for-operator-install
+      resources: {}
+      script: >
+        oc wait --for=condition=Ready pod -l name=fep-ansible-operator -n
+        $(context.taskRun.namespace)
+    - image: >-
+        intreg0.fpet.pokprv.stglabs.ibm.com:5000/openshift/cli:latest
+      name: create-fep-cluster
+      resources: {}
+      script: |
+        #!/bin/bash
+        cat <<EOF | oc apply -f -
+          kind: FEPCluster
+          apiVersion: fep.fujitsu.io/v2
+          metadata:
+            name: $(params.fepcluster-name)
+            namespace: $(context.taskRun.namespace)
+          spec:
+            fep:
+              customAnnotations:
+                allDeployments: {}
+              forceSsl: true
+              image:
+                pullPolicy: IfNotPresent
+              instances: 1
+              mcSpec:
+                limits:
+                  cpu: 500m
+                  memory: 700Mi
+                requests:
+                  cpu: 200m
+                  memory: 512Mi
+              podAntiAffinity: false
+              podDisruptionBudget: false
+              servicePort: 27500
+              syncMode: 'off'
+              sysExtraLogging: false
+            fepChildCrVal:
+              backup:
+                image:
+                  pullPolicy: IfNotPresent
+                mcSpec:
+                  limits:
+                    cpu: 0.2
+                    memory: 300Mi
+                  requests:
+                    cpu: 0.1
+                    memory: 200Mi
+                pgbackrestParams: |
+                  # if log volume is not defined, log_directory should be
+                  # changed to '/database/userdata/data/log'
+                  [global]
+                  repo1-retention-full=7
+                  repo1-retention-full-type=time
+                  log-path=/database/log/backup
+                postScript: ' '
+                preScript: ' '
+                schedule:
+                  num: 2
+                schedule1:
+                  schedule: 15 0 * * 0
+                  type: full
+                schedule2:
+                  schedule: 15 0 * * 1-6
+                  type: incr
+                schedule3:
+                  schedule: ' '
+                  type: ' '
+                schedule4:
+                  schedule: ' '
+                  type: ' '
+                schedule5:
+                  schedule: ' '
+                  type: ' '
+              customPgAudit: |
+                # define pg audit custom params here to override defaults.
+                # if log volume is not defined, log_directory should be
+                # changed to '/database/userdata/data/log'
+                [output]
+                logger = 'auditlog'
+                log_directory = '/database/log/audit'
+                log_truncate_on_rotation = on
+                log_filename = 'pgaudit-%a.log'
+                log_rotation_age = 1d
+                log_rotation_size = 0
+                [rule]
+              customPgHba: |
+                # define pg_hba custom rules here to be merged with default rules.
+                # TYPE     DATABASE        USER        ADDRESS        METHOD
+              customPgParams: >
+                # define custom postgresql.conf parameters below to override defaults.
+
+                # Current values are as per default FEP deployment
+
+                shared_preload_libraries='pgx_datamasking,pg_prewarm,pg_stat_statements'
+
+                session_preload_libraries='pg_prewarm'
+
+                max_prepared_transactions = 100
+
+                max_worker_processes = 30
+
+                max_connections = 100
+
+                work_mem = 1MB
+
+                maintenance_work_mem = 12MB
+
+                shared_buffers = 128MB
+
+                effective_cache_size = 384MB
+
+                checkpoint_completion_target = 0.8
+
+                # tcp parameters
+
+                tcp_keepalives_idle = 30
+
+                tcp_keepalives_interval = 10
+
+                tcp_keepalives_count = 3
+
+                # logging parameters in default fep installation
+
+                # if log volume is not defined, log_directory should be
+
+                # changed to '/database/userdata/data/log'
+
+                log_directory = '/database/log'
+
+                log_filename = 'logfile-%a.log'
+
+                log_file_mode = 0600
+
+                log_truncate_on_rotation = on
+
+                log_rotation_age = 1d
+
+                log_rotation_size = 0
+
+                log_checkpoints = on
+
+                log_line_prefix = '%e %t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h'
+
+                log_lock_waits = on
+
+                log_autovacuum_min_duration = 60s
+
+                logging_collector = on
+
+                pgaudit.config_file='/opt/app-root/src/pgaudit-cfg/pgaudit.conf'
+
+                log_replication_commands = on
+
+                log_min_messages = WARNING
+
+                log_destination = csvlog
+
+                # wal_archive parameters in default fep installation
+
+                archive_mode = on
+
+                archive_command = 'pgbackrest --stanza=backupstanza
+                --config=/database/userdata/pgbackrest.conf archive-push %p'
+
+                wal_level = replica
+
+                max_wal_senders = 12
+
+                wal_keep_segments = 64
+
+                track_activities = on
+
+                track_counts = on
+
+                password_encryption = 'md5'
+              storage:
+                archivewalVol:
+                  size: 1Gi
+                  storageClass: $(params.storageclass)
+                backupVol:
+                  size: 2Gi
+                  storageClass: $(params.storageclass)
+                dataVol:
+                  size: 2Gi
+                  storageClass: $(params.storageclass)
+                logVol:
+                  size: 1Gi
+                  storageClass: $(params.storageclass) 
+                tablespaceVol:
+                  size: 512Mi
+                  storageClass: $(params.storageclass) 
+                walVol:
+                  size: 1200Mi
+                  storageClass: $(params.storageclass) 
+              sysUsers:
+                pgAdminPassword: admin-password
+                pgRewindPassword: rewind_password
+                pgRewindUser: rewind_user
+                pgdb: mydb
+                pgpassword: mydbpassword
+                pgreplpassword: repluserpwd
+                pgrepluser: repluser
+                pguser: mydbuser
+                tdepassphrase: tde-passphrase
+              systemCertificates:
+                cacrt: |-
+                  -----BEGIN CERTIFICATE-----
+                  MIIDTzCCAjegAwIBAgIUYssQ8I74US5g+1+Z7CHuaDgkZnEwDQYJKoZIhvcNAQEL
+                  BQAwNzEQMA4GA1UECgwHRnVqaXRzdTEjMCEGA1UEAwwaRkVQIFJvb3QgQ0EgZm9y
+                  IEt1YmVybmV0ZXMwHhcNMjEwMjA2MDM1MjI4WhcNMzEwMjA0MDM1MjI4WjA3MRAw
+                  DgYDVQQKDAdGdWppdHN1MSMwIQYDVQQDDBpGRVAgUm9vdCBDQSBmb3IgS3ViZXJu
+                  ZXRlczCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMs97gUF0xkUzCgL
+                  7MiiDju9ySr/ziwjvcYU7jA9ML+SLmftMs3HtcYbAmSntqI+MDBSR/FAJTOoytuT
+                  pV+mCFcGj2YAjDpliHPeNcUpbryy4YMChF3+MovkIwGCksxo5rhiWhGmoBYpA48P
+                  4Xe8SPlzqMzhFvNeKzyiUhvjutS2Y1Ss38lsTaurFPx64vQ2PaC54XzdwMptXtpb
+                  tYmWSzCpJWwxZ6lF3vitdA2w0tnBWNyctAd0+RIM/fvArxiIqseAux9t0uogm5to
+                  lRIhvekuxOpXBPEqtIYQ4j9XUW2JH8vUDnzPkPvjrq+A3Ug8OyyfGVrW7+VYXozu
+                  c4aP7P0CAwEAAaNTMFEwHQYDVR0OBBYEFBzCutQ7S74WEhS5V2sNEJBGyLpmMB8G
+                  A1UdIwQYMBaAFBzCutQ7S74WEhS5V2sNEJBGyLpmMA8GA1UdEwEB/wQFMAMBAf8w
+                  DQYJKoZIhvcNAQELBQADggEBAMDwD85RAaWEBptFgLzKw+9xEUy1vcZaonAuA1qc
+                  T342XTueyAugxkC11HwdCGgGS34VyctfMGqj4AW6pA2ez4tLrbOps4DmV4sw8uBL
+                  8pgRDgfly3ob9FEg2wa0hmrwX9jH5Bt4vySUE2785uPAqaspT2UNtTBxS85BUi1T
+                  sKId2Rtil6an281Z81wyWVI6Jm2D4MG0mbsiGcTPlCtdg/UljvDYymXlAvd4vNhl
+                  k9hDa13TgDqJKgKdTIcmZoNQdpEVgFcO0h9AEUy5AuLqxHq60dLfZ6ESGPlMI7Lm
+                  i4PzYbCnBmOe+7TnHcPSyrnehs66Ik+oifRd82eYS7vKjFw=
+                  -----END CERTIFICATE-----
+                crt: |-
+                  -----BEGIN CERTIFICATE-----
+                  MIIDUTCCAjmgAwIBAgIRAMocW3qMoHrD6qRvMPppMkMwDQYJKoZIhvcNAQELBQAw
+                  NzEQMA4GA1UECgwHRnVqaXRzdTEjMCEGA1UEAwwaRkVQIFJvb3QgQ0EgZm9yIEt1
+                  YmVybmV0ZXMwHhcNMjEwMjA2MDQzMjM2WhcNMjYwMjA1MDQzMjM2WjA/MRAwDgYD
+                  VQQKEwdGdWppdHN1MSswKQYDVQQDEyJGVUpJVFNVIEVudGVycHJpc2UgUG9zdGdy
+                  ZXMgU2VydmVyMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4AI33yvH
+                  Zws+jta6qpV6wzJqF8odIfTIpCfbrVcUUtLFKJ1I2e4SceTKi6O3C/I1XuvWlpng
+                  5IO65+fQQLO06z1/AuQT78YUn/Wlm9x1aHVsv4ANB5JWWqDOjrRT3o7nRPGXfila
+                  bP0rGE2mJJcVR9nExJ3IeaktgT3sb8YlXvtchyYpmjdbfxabTz07ig0+6/cwKoRR
+                  xOK8Uf7f5euE0cI/490J6r5Rs4lgD8sIQNCUFlTFYvmAH7gcdssSFBt8NPlUATHE
+                  soFmlW0DKCJWNhTLOht+s6L/1zwTHLjPG2pdkG6Wdgmu5H2pDml8CDNLDv98Aj7i
+                  +I5SRKKcVPlnuQIDAQABo1AwTjAdBgNVHSUEFjAUBggrBgEFBQcDAQYIKwYBBQUH
+                  AwIwDAYDVR0TAQH/BAIwADAfBgNVHSMEGDAWgBQcwrrUO0u+FhIUuVdrDRCQRsi6
+                  ZjANBgkqhkiG9w0BAQsFAAOCAQEAm5dxBoI9pScOCvRAchg4CprdRDSJb9K6yB3O
+                  nCAxnM47iHeXnY3WlnI388kHu8DU7O4ba1tJbGs3KY9KzioPk43pU12jWkO1onoF
+                  +mTDjx/Ef1cYWA9r5q/LtgTa6Q2sxV4O2x67QW82aAnaxO34dV5zWCPIvAoovZBV
+                  HRT+BgCg3r2vD1RGKK2nl1aYJtWhO1SZubam+VttdZ/vbM9oOJctxmImsEtBXjkY
+                  KteePdQtLL5o03JhyXWyRshCq+HMmKf2KgyY8gvydGcP4eLQdBWcW40LcnVq6UjT
+                  0kJycJEKngMVademq1ZWHGaiYB7hyT6GhgIcHUJ2cKrPgbEh1Q==
+                  -----END CERTIFICATE-----
+                key: |-
+                  -----BEGIN RSA PRIVATE KEY-----
+                  MIIEowIBAAKCAQEA4AI33yvHZws+jta6qpV6wzJqF8odIfTIpCfbrVcUUtLFKJ1I
+                  2e4SceTKi6O3C/I1XuvWlpng5IO65+fQQLO06z1/AuQT78YUn/Wlm9x1aHVsv4AN
+                  B5JWWqDOjrRT3o7nRPGXfilabP0rGE2mJJcVR9nExJ3IeaktgT3sb8YlXvtchyYp
+                  mjdbfxabTz07ig0+6/cwKoRRxOK8Uf7f5euE0cI/490J6r5Rs4lgD8sIQNCUFlTF
+                  YvmAH7gcdssSFBt8NPlUATHEsoFmlW0DKCJWNhTLOht+s6L/1zwTHLjPG2pdkG6W
+                  dgmu5H2pDml8CDNLDv98Aj7i+I5SRKKcVPlnuQIDAQABAoIBAFPQYKlOzw/+BA0b
+                  yMIUpdctIMb/54CR/xR0mVw1DbSjigNVPjHUQvB8Y1B2FAITQObgJO06bAv0QdWN
+                  Rb0/v/yYiNJDFjaLjaIAHlO/2+oWrXbFaZqgpVDJhB+e1xaZr2x7XGxm+p925k30
+                  l6pvIRY+I8JRKvZiV1VZHwL/R3JOtPr++xMZtLVjVOI+f+ySqJ+TZHuAjm49EKxj
+                  cEmmJ28b7QcziXsvKy00f+zbqLIBKXQdZAFU5eEr1BsDRXdRW+Kf0XIvftuy4BJZ
+                  voKT+VGhEvF/qysswL4+6IAO6tpuYnnM0Y2d3sOGoWPkTcQK0MekYKzL/WmtCjNs
+                  9hodJtECgYEA5EWyhEOf4uOKe5TDp697UCUvXLoOR58FDe/S8XNvScn29jjOkqIg
+                  OMoqo9xAkJTNTzqn5UUdt1x/pgM2NxlPLFijrc0zQlX3SoOO2ryDd9WNi7YKtN16
+                  KJqa536WeZu2OEbuAZ+S3GALVy1RPeTNPnUOmKnF06DjDUGzLNCZy10CgYEA+zfw
+                  952DWuz1U0Z4wvAEqqcgUKXPKrkTXV/iUnjkDkrLYVr0ZofDNTXrdHl+UedFmaOC
+                  cieZn6DNhcdz5tKtyysGMH3g/qs9PfoGUngvcXsy0Egk04l3x1jc8TTCLqXZXYaQ
+                  HMsx51n+R58oncPtzYSUOr9qQ6PbC2CstTbFJA0CgYEAjGEsUliAB/jknfEzjXjG
+                  PdhQUxb8VyE864Az2lah9t/kJzFyIAziAeqZ5GE7t247AGFTBRTHHI8e1Qoemi3P
+                  Wbc9GVIbFs1lIYbcIDpUIyrKPEP8O5QEXtoNLxXTFgAjRGKiVY87spjCAJ+W2ZhO
+                  e/1it5GYXfgQCYQA2yuBmOUCgYANRkR2YR1axaCk+NlSu6oTdmdPu6M5x7PNQE7O
+                  OtMaKjua9lppvIzFGAdMDUtueoEEAE7ZR1xnwfB6PDLUpJdIYAqgr1YfPt8qkjaZ
+                  Tv56yZ7CwL0pbF8m6nwqRrZoDp1wwraEvvvxFKFKGY/k3kCHlpTakdjEoDjn3gDi
+                  RnWeVQKBgCEneMSzucei5LRppRtRaJw/Btll8qlPMlX3W7dxQ3cLwpmLOn0m51Fp
+                  PIZ44zYK8R6fu4+/sSrlfaIg86Ugeufp6YNxyNROKxUGza5vDIu5OftwWtBeg+UK
+                  Z8lLWNdX6pp7WMujmF3H1DrkBbauYMUKZ4UxUYtelgHERMePIxwb
+                  -----END RSA PRIVATE KEY-----
+        EOF
+    - image: >-
+        intreg0.fpet.pokprv.stglabs.ibm.com:5000/openshift/cli:latest
+      name: wait-for-fep-cluster
+      resources: {}
+      script: >
+        #!/bin/bash
+
+        set -ex
+
+        #wait for up to 20 minutes for the fep pod to be created
+        
+        for i in {0..60} ; do 
+          
+          if oc get pods -n $(context.taskRun.namespace) | grep $(params.fepcluster-name) ; then
+        
+            break
+        
+          else
+        
+            sleep 20
+        
+          fi
+
+        done
+
+        oc wait --for=condition=Ready pod --all -l fepclustername=$(params.fepcluster-name) --timeout=10m -n $(context.taskRun.namespace)
+
+        sleep 120

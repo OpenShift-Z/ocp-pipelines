@@ -1,0 +1,175 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: acmeaircard-build
+  namespace: acmeaircard
+spec:
+  params:
+    - default: 'https://github.ibm.com/LinuxCoC/Acme-Air-3.0.git'
+      description: url of the git repo for acmeair deployment
+      name: git-url
+      type: string
+    - default: main
+      description: revision of the git repo to be deployed
+      name: git-revision
+      type: string
+    - default: 'intreg0.fpet.pokprv.stglabs.ibm.com:5000'
+      name: image-location
+      description: where should the resulting images be placed?
+      type: string
+  tasks:
+    - name: fetch-repository
+      params:
+        - name: url
+          value: $(params.git-url)
+        - name: revision
+          value: $(params.git-revision)
+        - name: deleteExisting
+          value: 'true'
+      taskRef:
+        kind: ClusterTask
+        name: git-clone
+      workspaces:
+        - name: output
+          workspace: shared-ws
+    - name: build-cardservice-image
+      params:
+        - name: IMAGE
+          value: >-
+            $(params.image-location)/$(context.pipelineRun.namespace)/acmeair-cardservice-java:<arch>
+        - name: CONTEXT
+          value: /workspace/source/acmeair-cardservice-java
+        - name: DOCKERFILE
+          value: Dockerfile
+        - name: FORMAT
+          value: docker
+        - name: SKIP_PUSH
+          value: 'false'
+        - name: BUILD_EXTRA_ARGS
+          value: '--build-arg build_env=disconnected'
+      runAfter:
+        - fetch-repository
+      taskRef:
+        kind: ClusterTask
+        name: buildah
+      workspaces:
+        - name: source
+          workspace: shared-ws
+    - name: build-mainservice-image
+      params:
+        - name: IMAGE
+          value: >-
+            $(params.image-location)/$(context.pipelineRun.namespace)/acmeair-mainservice-java:<arch>
+        - name: CONTEXT
+          value: /workspace/source/acmeair-mainservice-java
+        - name: DOCKERFILE
+          value: ./Dockerfile
+        - name: FORMAT
+          value: docker
+        - name: SKIP_PUSH
+          value: 'false'
+        - name: BUILD_EXTRA_ARGS
+          value: '--build-arg build_env=disconnected'
+      runAfter:
+        - fetch-repository
+      taskRef:
+        kind: ClusterTask
+        name: buildah
+      workspaces:
+        - name: source
+          workspace: shared-ws
+    - name: build-authservice-image
+      params:
+        - name: IMAGE
+          value: >-
+            $(params.image-location)/$(context.pipelineRun.namespace)/acmeair-authservice-java:<arch>
+        - name: CONTEXT
+          value: /workspace/source/acmeair-authservice-java
+        - name: DOCKERFILE
+          value: ./Dockerfile
+        - name: FORMAT
+          value: docker
+        - name: SKIP_PUSH
+          value: 'false'
+        - name: BUILD_EXTRA_ARGS
+          value: '--build-arg build_env=disconnected'
+      runAfter:
+        - fetch-repository
+      taskRef:
+        kind: ClusterTask
+        name: buildah
+      workspaces:
+        - name: source
+          workspace: shared-ws
+    - name: build-bookingservice-image
+      params:
+        - name: IMAGE
+          value: >-
+            $(params.image-location)/$(context.pipelineRun.namespace)/acmeair-bookingservice-java:<arch>
+        - name: CONTEXT
+          value: /workspace/source/acmeair-bookingservice-java
+        - name: DOCKERFILE
+          value: ./Dockerfile
+        - name: FORMAT
+          value: docker
+        - name: SKIP_PUSH
+          value: 'false'
+        - name: BUILD_EXTRA_ARGS
+          value: '--build-arg build_env=disconnected'
+      runAfter:
+        - fetch-repository
+      taskRef:
+        kind: ClusterTask
+        name: buildah
+      workspaces:
+        - name: source
+          workspace: shared-ws
+    - name: build-flightservice-image
+      params:
+        - name: IMAGE
+          value: >-
+            $(params.image-location)/$(context.pipelineRun.namespace)/acmeair-flightservice-java:<arch>
+        - name: CONTEXT
+          value: /workspace/source/acmeair-flightservice-java
+        - name: DOCKERFILE
+          value: ./Dockerfile
+        - name: FORMAT
+          value: docker
+        - name: SKIP_PUSH
+          value: 'false'
+        - name: BUILD_EXTRA_ARGS
+          value: '--build-arg build_env=disconnected'
+      runAfter:
+        - fetch-repository
+      taskRef:
+        kind: ClusterTask
+        name: buildah
+      workspaces:
+        - name: source
+          workspace: shared-ws
+    - name: build-customerservice-image
+      params:
+        - name: IMAGE
+          value: >-
+            $(params.image-location)/$(context.pipelineRun.namespace)/acmeair-customerservice-java:<arch>
+        - name: CONTEXT
+          value: /workspace/source/acmeair-customerservice-java
+        - name: DOCKERFILE
+          value: ./Dockerfile
+        - name: FORMAT
+          value: docker
+        - name: SKIP_PUSH
+          value: 'false'
+        - name: BUILD_EXTRA_ARGS
+          value: '--build-arg build_env=disconnected'
+      runAfter:
+        - fetch-repository
+      taskRef:
+        kind: ClusterTask
+        name: buildah
+      workspaces:
+        - name: source
+          workspace: shared-ws
+  workspaces:
+    - name: shared-ws
+    - name: deploy-kubeconfig

@@ -1,0 +1,13 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerBinding
+metadata:
+  name: deploy-petstore-trigger-binding
+  namespace: petstore
+spec:
+  params:
+    - name: storageClass
+      value: $(body.storageClass)
+    - name: imageName
+      value: $(body.imageName)
+    - name: pusherName
+      value: $(body.pusherName)

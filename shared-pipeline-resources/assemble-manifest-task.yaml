@@ -1,0 +1,47 @@
+apiVersion: tekton.dev/v1beta1
+kind: ClusterTask
+metadata:
+  name: assemble-manifest
+spec:
+  params:
+    - description: Full manifest name including the registry and tag
+      name: manifest-name
+      type: string
+    - description: 'Full image name without tag, all images should use the same base name'
+      name: image-name
+      type: string
+    - description: comma separated list of tags to include in the manifest
+      name: tags
+      type: string
+  steps:
+    - image: >-
+        registry.redhat.io/rhel8/buildah@sha256:0a86ecbdfbe86e9d225b7fe4b090a0dd6d323f8afdfdf2bd933ff223ddb53320
+      name: create-manifest
+      resources: {}
+      script: >
+        #!/bin/bash 
+
+        tmpName="tmp-manifest:latest"
+
+        buildah manifest create "$tmpName"
+
+        tags="$(params.tags)"
+
+        for i in ${tags//,/ }
+
+        do
+
+          buildah manifest add "$tmpName" $(params.image-name):$i --authfile=/workspace/src-pull-secret/config.json --tls-verify=false
+
+        done
+
+        buildah manifest inspect "$tmpName"
+
+        buildah manifest push $tmpName "docker://$(params.manifest-name)"
+        --authfile=/workspace/dest-pull-secret/config.json --tls-verify=false
+        --all
+  workspaces:
+    - description: src image registry pull secret
+      name: src-pull-secret
+    - description: pull secret for destination image registry of manifest
+      name: dest-pull-secret

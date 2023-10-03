@@ -1,0 +1,90 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: deploy-acmeair-main
+  namespace: acmeaircard
+spec:
+  params:
+    - name: imageLocation
+      type: string
+    - name: applicationHost
+      type: string
+  steps:
+    - image: >-
+        intreg0.fpet.pokprv.stglabs.ibm.com:5000/openshift/cli:latest
+      name: create-main-deployment
+      resources: {}
+      script: |
+        #!/bin/bash
+
+        cat <<EOF | oc apply -f -
+          ###### Main Service ######
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: acmeair-mainservice
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                name: acmeair-main-deployment
+            template:
+              metadata:
+                labels:
+                  name: acmeair-main-deployment
+                  app: acmeair-3
+                annotations:
+                  prometheus.io/scrape: "true"
+                  prometheus.io/port: "9080"
+              spec:
+                containers:
+                - name: acmeair-mainservice-java
+                  image: $(params.imageLocation)/$(context.taskRun.namespace)/acmeair-mainservice-java:latest
+                  ports:
+                  - containerPort: 9080
+                  - containerPort: 9443
+                  imagePullPolicy: Always
+                  env:
+                  - name: USERNAME
+                    value: admin
+                  - name: PASSWORD
+                    value: password
+        EOF
+    - image: 'intreg0.fpet.pokprv.stglabs.ibm.com:5000/openshift/cli:latest'
+      name: create-main-service
+      resources: {}
+      script: |
+        #!/bin/bash
+
+        cat <<EOF | oc apply -f -
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: acmeair-main-service
+          spec:
+            ports:
+              - port: 9080
+            selector:
+              name: acmeair-main-deployment
+
+        EOF
+        sleep 120
+    - image: >-
+        intreg0.fpet.pokprv.stglabs.ibm.com:5000/openshift/cli:latest
+      name: create-routes
+      resources: {}
+      script: |
+        #!/bin/bash
+        cat <<EOF | oc apply -f -
+          apiVersion: route.openshift.io/v1
+          kind: Route
+          metadata:
+            name: acmeair-main-route
+          spec:
+            path: /acmeair
+            host: $(params.applicationHost)
+            to:
+              kind: Service
+              name: acmeair-main-service
+        EOF
+        sleep 30

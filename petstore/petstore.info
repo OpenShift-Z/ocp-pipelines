@@ -1,0 +1,2 @@
+repo_url: https://github.ibm.com/LinuxCoC/petstore.git
+deploy_targets: [test0, prod0]

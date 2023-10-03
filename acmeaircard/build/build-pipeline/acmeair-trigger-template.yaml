@@ -1,0 +1,51 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerTemplate
+metadata:
+  name: acmeaircard-build-trigger-template
+  namespace: acmeaircard
+spec:
+  params:
+    - name: pusherName
+    - name: storageClass
+    - name: imageLocation
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        annotations:
+          pipeline.openshift.io/started-by: $(tt.params.pusherName)
+        generateName: acmeaircard-build-
+        labels:
+          tekton.dev/pipeline: acmeaircard-build
+        namespace: acmeaircard
+      spec:
+        params:
+          - name: deployment-name
+            value: acmeaircard
+          - name: git-url
+            value: 'https://github.ibm.com/LinuxCoC/Acme-Air-3.0.git'
+          - name: git-revision
+            value: main
+          - name: image-location
+            value: '$(tt.params.imageLocation)'
+        pipelineRef:
+          name: acmeaircard-build
+        resources: []
+        status: null
+        workspaces:
+          - name: shared-ws
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 1Gi
+                storageClassName: $(tt.params.storageClass)
+                volumeMode: Filesystem
+          - name: deploy-kubeconfig
+            secret:
+              secretName: <deploy-cluster-name>-kubeconf 
+          - name: push-secret
+            secret:
+              secretName: intreg0

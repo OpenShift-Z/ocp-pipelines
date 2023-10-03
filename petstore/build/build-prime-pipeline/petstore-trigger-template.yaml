@@ -1,0 +1,60 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerTemplate
+metadata:
+  name: petstore-build-prime-trigger-template
+  namespace: petstore
+spec:
+  params:
+    - name: pusher-name
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        annotations:
+          pipeline.openshift.io/started-by: $(tt.params.pusher-name)
+        generateName: petstore-build-prime-
+        labels:
+          tekton.dev/pipeline: petstore-build-prime
+        namespace: petstore
+      spec:
+        params:
+          - name: pusherName
+            value: $(tt.params.pusher-name)
+        pipelineRef:
+          name: petstore-build-prime
+        resources: []
+        status: null
+        workspaces:
+          - name: funkid-creds-secret
+            secret:
+              secretName: funkid-creds
+          - name: build0-kubeconfig-pvc
+            volumeClaimTemplate:
+              metadata:
+                creationTimestamp: null
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 100Mi
+                storageClassName: nfs-client
+                volumeMode: Filesystem
+          - name: xocp1-kubeconfig-pvc
+            volumeClaimTemplate:
+              metadata:
+                creationTimestamp: null
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 100Mi
+                storageClassName: nfs-client
+                volumeMode: Filesystem
+          - name: src-pull-secret
+            secret:
+              secretName: intreg0
+          - name: dest-pull-secret
+            secret:
+              secretName: intreg0

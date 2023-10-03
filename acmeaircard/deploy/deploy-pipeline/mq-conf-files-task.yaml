@@ -1,0 +1,65 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: create-mq-conf-files
+  namespace: acmeaircard
+spec:
+  steps:
+    - image: >-
+        intreg0.fpet.pokprv.stglabs.ibm.com:5000/openshift/cli:latest
+      name: create-deployment
+      resources: {}
+      script: |
+        #!/bin/bash
+
+        cat <<EOF | oc apply -f -
+          apiVersion: v1
+          data:
+            ccdt.json: |
+              {
+                  "channel":
+                  [
+                      {
+                          "name": "SECUREQMCHL",
+                          "clientConnection":
+                          {
+                              "connection":
+                              [
+                                  {
+                                      "host": "secureqm-ibm-mq-qm-ibm-mq-test.apps.lzocp1.pok.stglabs.ibm.com",
+                                      "port": 443
+                                  }
+                              ],
+                              "queueManager": "SECUREQM"
+                          },
+                          "transmissionSecurity":
+                          {
+                            "cipherSpecification": "TLS_RSA_WITH_AES_128_CBC_SHA256"
+                          },
+                          "type": "clientConnection"
+                      }
+                ]
+              }
+            env.json: |
+              {
+                "MQ_ENDPOINTS": [{
+                  "HOST": "secureqm-ibm-mq-qm-ibm-mq-test.apps.lzocp1.pok.stglabs.ibm.com",
+                  "PORT": "443",
+                  "QMGR": "SECUREQM",
+                  "QUEUE_NAME": "EXAMPLE.QUEUE",
+                  "CCDT": "file:///mq-files/conf/ccdt.json",
+                  "MQCCDTURL": "file:///mq-files/conf/ccdt.json",
+                  "CIPHER": "TLS_RSA_WITH_AES_128_CBC_SHA256",
+                  "CIPHER_SUITE": "TLS_RSA_WITH_AES_128_CBC_SHA256",
+                  "KEY_REPOSITORY": "/mq-files/keys/clientkey.jks",
+                  "TOPIC_NAME": "TestTopic",
+                  "CHANNEL": "SECUREQMCHL"
+                }]
+              }
+            mqclient.ini: |
+              SSL:
+                  OutboundSNI=HOSTNAME
+          kind: ConfigMap
+          metadata:
+            name: mq-conf-files
+        EOF

@@ -1,0 +1,179 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: deploy-acmeair-customer
+  namespace: acmeaircard
+spec:
+  params:
+    - name: imageLocation
+      type: string
+    - name: applicationHost
+      type: string
+  steps:
+    - image: >-
+        intreg0.fpet.pokprv.stglabs.ibm.com:5000/openshift/cli:latest
+      name: create-customer-deployment
+      resources: {}
+      script: |
+        #!/bin/bash
+
+        cat <<EOF | oc apply -f -
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: acmeair-customerservice
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                name: acmeair-customer-deployment
+            template:
+              metadata:
+                labels:
+                  name: acmeair-customer-deployment
+                  app: acmeair-3
+                annotations:
+                  prometheus.io/scrape: "true"
+                  prometheus.io/port: "9080"
+              spec:
+                containers:
+                - name: acmeair-customerservice-java
+                  image: $(params.imageLocation)/$(context.taskRun.namespace)/acmeair-customerservice-java:latest
+                  ports:
+                    - containerPort: 9080
+                    - containerPort: 9443
+                  imagePullPolicy: Always
+                  env:
+                  - name: USERNAME
+                    value: admin
+                  - name: PASSWORD
+                    value: password
+                  - name: MONGO_PORT
+                    value: "27017"
+                  - name: MONGO_HOST
+                    value: acmeair-customer-db
+                  - name: SECURE_SERVICE_CALLS
+                    value: 'true'
+                  - name: JVM_ARGS
+                    value: "-Dmp.jwt.verify.publickey.location=http://acmeair-auth-service:9080/auth/getJwk"
+                  readinessProbe:
+                    httpGet:
+                      path: /health
+                      port: 9080
+                    initialDelaySeconds: 10
+                    periodSeconds: 5
+                  livenessProbe:
+                    httpGet:
+                      path: /health
+                      port: 9080
+                    initialDelaySeconds: 120
+                    periodSeconds: 15
+        EOF
+    - image: 'intreg0.fpet.pokprv.stglabs.ibm.com:5000/openshift/cli:latest'
+      name: create-customer-service
+      resources: {}
+      script: |
+        #!/bin/bash
+
+        cat <<EOF | oc apply -f -
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: acmeair-customer-service
+          spec:
+            ports:
+              - port: 9080
+            selector:
+              name: acmeair-customer-deployment
+        EOF
+    - image: 'intreg0.fpet.pokprv.stglabs.ibm.com:5000/openshift/cli:latest'
+      name: create-db-service
+      resources: {}
+      script: |
+        #!/bin/bash
+
+        cat <<EOF | oc apply -f -
+          ##### Customer Database #####
+          apiVersion: v1
+          kind: Service
+          metadata:
+            creationTimestamp: null
+            labels:
+              service: acmeair-customer-db
+            name: acmeair-customer-db
+          spec:
+            ports:
+            - name: "27017"
+              port: 27017
+              protocol: TCP
+              targetPort: 27017
+            selector:
+              name: acmeair-customer-db
+          status:
+            loadBalancer: {}
+        EOF
+    - image: 'intreg0.fpet.pokprv.stglabs.ibm.com:5000/openshift/cli:latest'
+      name: create-db-deployment
+      resources: {}
+      script: |
+        #!/bin/bash
+
+        cat <<EOF | oc apply -f -
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            creationTimestamp: null
+            name: acmeair-customer-db
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                name: acmeair-customer-db
+            strategy: {}
+            template:
+              metadata:
+                creationTimestamp: null
+                labels:
+                  name: acmeair-customer-db
+              spec:
+                volumes:
+                  - name: acmeair-customer-db-1
+                    emptyDir: {}
+                  - name: acmeair-customer-db-2
+                    emptyDir: {}
+                containers:
+                - image: $(params.imageLocation)/$(context.taskRun.namespace)/mongo:latest 
+                  name: acmeair-customer-db
+                  ports:
+                  - containerPort: 27017
+                    protocol: TCP
+                  resources: {}
+                  volumeMounts:
+                    - name: acmeair-customer-db-1
+                      mountPath: /data/configdb
+                    - name: acmeair-customer-db-2
+                      mountPath: /data/db
+                restartPolicy: Always
+          status: {}
+
+        EOF
+        sleep 120
+    - image: >-
+        intreg0.fpet.pokprv.stglabs.ibm.com:5000/openshift/cli:latest
+      name: create-routes
+      resources: {}
+      script: |
+        #!/bin/bash
+        cat <<EOF | oc apply -f -
+          apiVersion: route.openshift.io/v1
+          kind: Route
+          metadata:
+            name: acmeair-customer-route
+          spec:
+            path: /customer
+            host: $(params.applicationHost)
+            to:
+              kind: Service
+              name: acmeair-customer-service
+        EOF
+        sleep 30

@@ -1,0 +1,25 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: EventListener
+metadata:
+  name: <project-name>-deploy-event-listener
+  namespace: <project-name>
+spec:
+  namespaceSelector: {}
+  resources: {}
+  serviceAccountName: pipeline
+  triggers:
+    - bindings:
+        - kind: TriggerBinding
+          ref: <project-name>-deploy-trigger-binding
+      template:
+        ref: <project-name>-deploy-trigger-template
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: <project-name>-deploy-event-listener-route
+  namespace: <project-name>
+spec:
+  to:
+    kind: Service
+    name: el-<project-name>-deploy-event-listener

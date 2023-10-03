@@ -1,0 +1,26 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: EventListener
+metadata:
+  name: acmeaircard-build-prime-event-listener
+  namespace: acmeaircard
+spec:
+  namespaceSelector: {}
+  resources: {}
+  serviceAccountName: pipeline
+  triggers:
+    - bindings:
+        - kind: TriggerBinding
+          ref: acmeaircard-build-prime-trigger-binding
+      template:
+        ref: acmeaircard-build-prime-trigger-template
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: acmeaircard-build-prime-event-listener-route
+  namespace: acmeaircard
+spec:
+  host: build-event-listener-route-acmeaircard.apps.build0.fpet.pokprv.stglabs.ibm.com
+  to:
+    kind: Service
+    name: el-acmeaircard-build-prime-event-listener

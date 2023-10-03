@@ -1,0 +1,96 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: deploy-acmeaircard
+  namespace: acmeaircard
+spec:
+  params:
+    - default: nfs-client
+      description: the storage class to be used for Flight Service PVC
+      name: storageClass
+      type: string
+    - default: intreg0.fpet.pokprv.stglabs.ibm.com:5000/<deploy-cluster-name>
+      description: location of acmeair images to be used in deployments
+      name: imageLocation
+      type: string
+    - description: acmeair application hostname
+      type: string
+      name: applicationHost
+  tasks:
+    - name: deploy-acmeair-auth
+      params:
+        - name: imageLocation
+          value: $(params.imageLocation)
+        - name: applicationHost
+          value: $(params.applicationHost)
+      taskRef:
+        kind: Task
+        name: deploy-acmeair-auth
+    - name: deploy-acmeair-booking
+      params:
+        - name: imageLocation
+          value: $(params.imageLocation)
+        - name: applicationHost
+          value: $(params.applicationHost)
+      taskRef:
+        kind: Task
+        name: deploy-acmeair-booking
+    - name: create-mq-conf-files
+      taskRef:
+        kind: Task
+        name: create-mq-conf-files
+    - name: deploy-acmeair-card
+      params:
+        - name: imageLocation
+          value: $(params.imageLocation)
+        - name: applicationHost
+          value: $(params.applicationHost)
+      taskRef:
+        kind: Task
+        name: deploy-acmeair-card
+      runAfter:
+        - create-mq-conf-files
+    - name: deploy-acmeair-customer
+      params:
+        - name: imageLocation
+          value: $(params.imageLocation)
+        - name: applicationHost
+          value: $(params.applicationHost)
+      taskRef:
+        kind: Task
+        name: deploy-acmeair-customer
+    - name: deploy-acmeair-flight
+      params:
+        - name: imageLocation
+          value: $(params.imageLocation)
+        - name: storageClass
+          value: $(params.storageClass)
+        - name: applicationHost
+          value: $(params.applicationHost)
+      taskRef:
+        kind: Task
+        name: deploy-acmeair-flight
+    - name: deploy-acmeair-main
+      params:
+        - name: imageLocation
+          value: $(params.imageLocation)
+        - name: applicationHost
+          value: $(params.applicationHost)
+      taskRef:
+        kind: Task
+        name: deploy-acmeair-main
+    - name: wait-for-deployment
+      params:
+        - name: SCRIPT
+          value: >
+           oc wait --for=condition=Ready pods --all -l app=acmeair-3 -n $(context.pipelineRun.namespace) --timeout=10m 
+      runAfter:
+        - deploy-acmeair-auth
+        - deploy-acmeair-booking
+        - deploy-acmeair-card
+        - deploy-acmeair-customer
+        - deploy-acmeair-flight
+        - deploy-acmeair-main
+      taskRef:
+        kind: ClusterTask
+        name: ocp-client

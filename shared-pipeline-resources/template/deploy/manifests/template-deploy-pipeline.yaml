@@ -1,0 +1,29 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: deploy-<project-name>
+  namespace: <project-name>
+spec:
+  params:
+    - default: intreg0.fpet.pokprv.stglabs.ibm.com:5000/test0
+      description: location of <project-name> images to be used in deployments
+      name: imageLocation
+      type: string
+  tasks:
+    - name: deploy-image
+      params:
+        - name: imageLocation
+          value: $(params.imageLocation)
+      taskRef:
+        kind: Task
+        name: deploy-image
+    - name: wait-for-deployment
+      params:
+        - name: SCRIPT
+          value: >
+           oc wait --for=condition=Ready pods --all -l app=<project-name> -n $(context.pipelineRun.namespace)
+      runAfter:
+        - deploy-image
+      taskRef:
+        kind: ClusterTask
+        name: openshift-client

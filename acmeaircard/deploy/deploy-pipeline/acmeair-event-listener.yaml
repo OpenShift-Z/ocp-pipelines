@@ -1,0 +1,25 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: EventListener
+metadata:
+  name: acmeaircard-deploy-event-listener
+  namespace: acmeaircard
+spec:
+  namespaceSelector: {}
+  resources: {}
+  serviceAccountName: pipeline
+  triggers:
+    - bindings:
+        - kind: TriggerBinding
+          ref: acmeaircard-deploy-trigger-binding
+      template:
+        ref: acmeaircard-deploy-trigger-template
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: deploy-acmeaircard-event-listener-route
+  namespace: acmeaircard
+spec:
+  to:
+    kind: Service
+    name: el-acmeaircard-deploy-event-listener

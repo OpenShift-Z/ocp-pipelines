@@ -1,0 +1,11 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerBinding
+metadata:
+  name: <project-name>-deploy-trigger-binding
+  namespace: <project-name>
+spec:
+  params:
+    - name: imageLocation
+      value: $(body.image.location)
+    - name: pusher-name
+      value: $(body.pusher.name)

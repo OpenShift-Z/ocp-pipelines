@@ -1,0 +1,117 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerTemplate
+metadata:
+  name: manager-pipeline-build-trigger-template
+  namespace: manager-pipeline
+spec:
+  params:
+    - name: pusher-name
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        annotations:
+          pipeline.openshift.io/started-by: $(params.pusher-name)
+        generateName: build-manager-pipeline-
+        labels:
+          tekton.dev/pipeline: build-manager-pipeline
+        namespace: manager-pipeline
+      spec:
+        pipelineRef:
+          name: manager-pipeline
+        serviceAccountName: pipeline
+        timeout: 1h0m0s
+        workspaces:
+          - name: test0-kubeconfig-pvc
+            volumeClaimTemplate:
+              metadata:
+                creationTimestamp: null
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 100Mi
+                storageClassName: nfs-client
+                volumeMode: Filesystem
+          - name: build0-kubeconfig-pvc
+            volumeClaimTemplate:
+              metadata:
+                creationTimestamp: null
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 100Mi
+                storageClassName: nfs-client
+                volumeMode: Filesystem
+          - name: xocp1-kubeconfig-pvc
+            volumeClaimTemplate:
+              metadata:
+                creationTimestamp: null
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 100Mi
+                storageClassName: nfs-client
+                volumeMode: Filesystem
+          - name: git-repo
+            volumeClaimTemplate:
+              metadata:
+                creationTimestamp: null
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 1Gi
+                storageClassName: nfs-client
+                volumeMode: Filesystem
+              status: {}
+          - name: git-secret
+            secret:
+              secretName: basic-user-pass
+          - name: funkid-creds-secret
+            secret:
+              secretName: funkid-creds
+---
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerBinding
+metadata:
+  name: manager-pipeline-build-trigger-binding
+  namespace: manager-pipeline
+spec:
+  params:
+    - name: pusher-name
+      value: $(body.pusher.name)
+---
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: EventListener
+metadata:
+  name: manager-pipeline-build-event-listener
+  namespace: manager-pipeline
+spec:
+  namespaceSelector: {}
+  resources: {}
+  serviceAccountName: pipeline
+  triggers:
+    - bindings:
+        - kind: TriggerBinding
+          ref: manager-pipeline-build-trigger-binding
+      template:
+        ref: manager-pipeline-build-trigger-template
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: manager-pipeline-build-event-listener-route
+  namespace: manager-pipeline
+spec:
+  host: build-event-listener-route.apps.build0.fpet.pokprv.stglabs.ibm.com
+  path: manager-pipeline
+  to:
+    kind: Service
+    name: el-manager-pipeline-build-event-listener

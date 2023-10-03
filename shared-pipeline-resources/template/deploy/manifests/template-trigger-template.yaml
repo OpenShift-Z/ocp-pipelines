@@ -1,0 +1,28 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerTemplate
+metadata:
+  name: <project-name>-deploy-trigger-template
+  namespace: <project-name>
+spec:
+  params:
+    - name: image-name
+    - name: storageclass-name
+    - name: pusher-name
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        annotations:
+          pipeline.openshift.io/started-by: $(params.pusher-name)
+        generateName: deploy-<project-name>-
+        labels:
+          tekton.dev/pipeline: deploy-<project-name>
+        namespace: <project-name>
+      spec:
+        params:
+          - name: imageLocation
+            value: $(params.imageLocation)
+        pipelineRef:
+          name: deploy-<project-name>
+        resources: []
+        status: null

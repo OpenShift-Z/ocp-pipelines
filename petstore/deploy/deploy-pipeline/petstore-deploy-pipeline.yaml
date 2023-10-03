@@ -1,0 +1,102 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: deploy-petstore
+  namespace: petstore
+spec:
+  params:
+    - default: nfs-client
+      description: the storage class to be used for all FEP PVC's
+      name: storageclass-name
+      type: string
+    - default: intreg0.fpet.pokprv.stglabs.ibm.com:5000/<deploy-cluster-name>/petstore/petstore:latest
+      description: petstore image to be used in deployment
+      name: image-tag
+      type: string
+    - default: petstore
+      description: petstore deployment name
+      type: string
+      name: deployment-name
+  tasks:
+    - name: install-fep
+      params:
+        - name: storageclass
+          value: $(params.storageclass-name)
+        - name: fepcluster-name
+          value: $(params.deployment-name)-fep
+      taskRef:
+        kind: Task
+        name: create-fep-for-petstore
+    - name: rsync-files
+      params:
+        - name: SCRIPT
+          value: >
+            oc rsync -n $(context.pipelineRun.namespace)
+            /workspace/manifest-dir/
+            $(params.deployment-name)-fep-sts-0:/tmp/postgres/ 
+      runAfter:
+        - install-fep
+      taskRef:
+        kind: ClusterTask
+        name: ocp-client
+      workspaces:
+        - name: manifest-dir
+          workspace: shared-ws
+    - name: configure-db
+      params:
+        - name: SCRIPT
+          value: >
+            set -ex
+
+            oc exec -n $(context.pipelineRun.namespace) -i
+            $(params.deployment-name)-fep-sts-0 -c fep-patroni -- chmod +x
+            /tmp/postgres/configure_db.sh 
+            
+            oc exec -n $(context.pipelineRun.namespace) -i
+            $(params.deployment-name)-fep-sts-0 -c fep-patroni -- bash -c
+            /tmp/postgres/configure_db.sh 
+      runAfter:
+        - rsync-files
+      taskRef:
+        kind: ClusterTask
+        name: ocp-client
+      workspaces:
+        - name: manifest-dir
+          workspace: shared-ws
+    - name: create-petstore-app
+      params:
+        - name: SCRIPT
+          value: >
+            set -ex
+
+            oc delete deployment $(params.deployment-name) -n $(context.pipelineRun.namespace) || true
+
+            oc delete svc $(params.deployment-name) || true
+            
+            oc delete route $(params.deployment-name) || true
+
+            oc wait --for=Delete pod -l deployment=$(params.deployment-name) -n $(context.pipelineRun.namespace) --timeout=3m
+            
+            sleep 10
+
+            oc import-image petstore --from=$(params.image-tag) -n $(context.pipelineRun.namespace) --confirm --insecure=true
+
+            oc new-app petstore:latest -n $(context.pipelineRun.namespace) --name $(params.deployment-name)
+      retries: 1
+      runAfter:
+        - configure-db
+      taskRef:
+        kind: ClusterTask
+        name: ocp-client
+    - name: expose-service
+      params:
+        - name: SCRIPT
+          value: >
+           oc expose svc $(params.deployment-name) -n $(context.pipelineRun.namespace)
+      runAfter:
+        - create-petstore-app
+      taskRef:
+        kind: ClusterTask
+        name: ocp-client
+  workspaces:
+    - name: shared-ws

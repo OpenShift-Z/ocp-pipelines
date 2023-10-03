@@ -1,0 +1,9 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerBinding
+metadata:
+  name: acmeaircard-build-prime-trigger-binding
+  namespace: acmeaircard
+spec:
+  params:
+    - name: pusher-name
+      value: $(body.pusher.name)

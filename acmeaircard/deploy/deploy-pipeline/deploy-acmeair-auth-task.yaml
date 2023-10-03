@@ -1,0 +1,104 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: deploy-acmeair-auth
+  namespace: acmeaircard
+spec:
+  params:
+    - name: imageLocation
+      type: string
+    - name: applicationHost
+      type: string
+  steps:
+    - image: >-
+        intreg0.fpet.pokprv.stglabs.ibm.com:5000/openshift/cli:latest
+      name: create-deployment
+      resources: {}
+      script: |
+        #!/bin/bash
+
+        cat <<EOF | oc apply -f -
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: acmeair-authservice
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                name: acmeair-auth-deployment
+            template:
+              metadata:
+                labels:
+                  name: acmeair-auth-deployment
+                  app: acmeair-3
+                annotations:
+                  prometheus.io/scrape: "true"
+                  prometheus.io/port: "9080"
+              spec:
+                containers:
+                - name: acmeair-authservice-java
+                  image: $(params.imageLocation)/$(context.taskRun.namespace)/acmeair-authservice-java:latest
+                  ports:
+                    - containerPort: 9080
+                    - containerPort: 9443
+                  imagePullPolicy: Always
+                  env:
+                  - name: USERNAME
+                    value: admin
+                  - name: PASSWORD
+                    value: password
+                  - name: JVM_ARGS
+                    value: "-DcustomerClient/mp-rest/url=http://acmeair-customer-service:9080/customer"
+                  - name: SECURE_SERVICE_CALLS
+                    value: 'true'
+                  readinessProbe:
+                    httpGet:
+                      path: /health
+                      port: 9080
+                    initialDelaySeconds: 10
+                    periodSeconds: 5
+                  livenessProbe:
+                    httpGet:
+                      path: /health
+                      port: 9080
+                    initialDelaySeconds: 120
+                    periodSeconds: 15
+        EOF
+    - image: 'intreg0.fpet.pokprv.stglabs.ibm.com:5000/openshift/cli:latest'
+      name: create-service
+      resources: {}
+      script: |
+        #!/bin/bash
+
+        cat <<EOF | oc apply -f -
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: acmeair-auth-service
+          spec:
+            ports:
+              - port: 9080
+            selector:
+              name: acmeair-auth-deployment
+        EOF
+        sleep 120
+    - image: >-
+        intreg0.fpet.pokprv.stglabs.ibm.com:5000/openshift/cli:latest
+      name: create-routes
+      resources: {}
+      script: |
+        #!/bin/bash
+        cat <<EOF | oc apply -f -
+          apiVersion: route.openshift.io/v1
+          kind: Route
+          metadata:
+            name: acmeair-auth-route
+          spec:
+            path: /auth
+            host: $(params.applicationHost)
+            to:
+              kind: Service
+              name: acmeair-auth-service
+        EOF
+        sleep 30

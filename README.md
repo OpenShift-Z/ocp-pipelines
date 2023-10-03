@@ -6,7 +6,7 @@ The motivation of this repository is the idea that build and test clusters shoul
 ![Image build flow](./Build-Flow.png)
 
 ## petstore
-Pipelines to build and deploy the petstore app available [here](https://github.ibm.com/LinuxCoC/petstore)
+Pipelines to build and deploy the petstore app available [here](https://github.com/OpenShift-Z/petstore)
 ### build/build-pipeline
 The files in this folder are the generic build pipeline files. Using the manager-pipeline automation on build0, these pipelines can be quickly deployed to build either s390x or x86 images.
 ### build/build-prime-pipeline
@@ -15,7 +15,7 @@ The pipeline in this folder manages the multi-arch builds. Once each architectur
 This pipeline works with the build pipelines to be able to deploy petstore. It relies on some custom resources created by the build pipeline since those resources rely on the application source. The idea is that the clusters an app is deployed on will probably be disconnected.
 
 ## acmeaircard
-Pipelines to build and deploy the acmeaircard app available [here](https://github.ibm.com/LinuxCoC/Acme-Air-3.0)
+Pipelines to build and deploy the acmeaircard app available [here](https://github.com/OpenShift-Z/Acme-Air-3.0)
 
 
 ## Adding a new application

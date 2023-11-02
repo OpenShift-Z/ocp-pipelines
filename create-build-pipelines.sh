@@ -30,7 +30,8 @@ do
         oc patch namespace $projName -p \
          '{"metadata": {"annotations": {"operator.tekton.dev/prune.resources": "taskrun, pipelinerun", "operator.tekton.dev/prune.keep-since": "2880"}}}'
 
-        #create GH pull secret and link to the pipeline SA
+        #Should probably just use ESO to add these secrets to each new project
+	#create GH pull secret and link to the pipeline SA
         oc create secret generic sa-pull-secret --from-literal=username=<username> \
             --from-literal=password=<password> \
             --type=kubernetes.io/basic-auth --namespace $projName \

@@ -22,6 +22,7 @@ This directory contains yaml for various resources that are to be shared across 
 
 ## create-build-pipelines.sh
 This bash script is used by the manager pipeline to create resources for the application build pipelines. The manager pipeline was connected to a webhook from this repository such that each new commit to the pipelines repo would automatically update all pipeline resources across all clusters. The full description of the manager pipeline can be found in `./shared-pipeline-resources/manager-pipeline-resources/manager-pipeline.yaml`.
+This script will iterate over each of the directories in the root of this repo (excluding the `shared-pipeline-resources` dir) and create a new OCP project for any new directories. All build pipeline resources will then be updated in any old OCP projects or created in any new OCP projects.
 
 ## create-deploy-pipelines.sh
 This is the equivalent of the `create-build-pipelines.sh` script except for deploy pipelines rather than build pipelines.

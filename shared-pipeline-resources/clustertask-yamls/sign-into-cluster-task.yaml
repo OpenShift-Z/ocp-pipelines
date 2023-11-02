@@ -1,0 +1,37 @@
+apiVersion: tekton.dev/v1beta1
+kind: ClusterTask
+metadata:
+  name: sign-into-cluster
+spec:
+  params:
+    - name: clusterURL
+      type: string
+  steps:
+    - image: 'intreg0.your.hostname.here.com:5000/openshift/cli:latest'
+      name: sign-in
+      resources: {}
+      script: >
+        USER=$(cat /workspace/creds/username) 
+
+        PASSWD=$(cat /workspace/creds/password)
+
+
+        oc login $(params.clusterURL):6443 -u $USER -p $PASSWD
+        --insecure-skip-tls-verify=true
+
+
+        cp ~/.kube/config /workspace/kubeconfig/kubeconfig
+
+        chmod 755 /workspace/kubeconfig/kubeconfig
+    - image: 'intreg0.your.hostname.here.com:5000/openshift/cli:latest'
+      name: cat-config
+      resources: {}
+      script: |
+        cat /workspace/kubeconfig/kubeconfig
+  workspaces:
+    - description: The signed in kubeconfig will be placed at /mnt/kubeconfig/kubeconfig
+      name: kubeconfig
+    - description: >-
+        secret with OCP user credentials with two files 'username' and
+        'password'
+      name: creds
